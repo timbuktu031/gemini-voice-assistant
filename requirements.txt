@@ -1,0 +1,7 @@
+# 📄 requirements.txt
+google-generativeai>=0.3.0
+google-cloud-texttospeech>=2.14.0
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+pytz>=2022.7
+tkinter  # 보통 파이썬에 기본 포함
