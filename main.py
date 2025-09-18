@@ -69,8 +69,8 @@ def send_to_gui(msg_type, content):
     try:
         gui_queue.put((msg_type, content))
         print(f"[GUI] {msg_type}: {content}")
-    except:
-        pass
+    except Exception as e:
+        print(f"GUI 전송 오류: {e}")
 
 def get_real_time_info(searcher, prompt):
     """실시간 정보 수집"""
