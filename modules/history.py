@@ -2,14 +2,13 @@
 import json
 import os
 from datetime import datetime
-from config import app_config
 
 class ConversationHistory:
     """대화 히스토리 관리"""
     
-    def __init__(self):
-        self.history_file = app_config.history_file
-        self.max_history = app_config.max_history
+    def __init__(self, history_file="conversation_history.json", max_history=10):
+        self.history_file = history_file
+        self.max_history = max_history
         self.conversations = []
         self.load_history()
     
