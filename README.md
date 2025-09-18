@@ -55,17 +55,17 @@ pip install -r requirements.txt
 # .env 파일 생성
 cp .env.example .env
 
+# 실제 API 키 입력
+nano .env
+```
+but
+
 이 방법을 사용 했음
 export NAVER_CLIENT_ID=your_naver_id
 export NAVER_CLIENT_SECRET=your_naver_secret
 export WEATHER_API_KEY=your_weather_key
 export GEMINI_API_KEY=your_gemini_key
 export GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-
-
-# 실제 API 키 입력
-nano .env
-```
 
 ### 5. Google Cloud 인증 설정
 ```bash
