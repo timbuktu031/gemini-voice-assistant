@@ -5,6 +5,7 @@ import sys
 import io
 import locale
 import re
+from modules.gui import GeminiGUI
 
 # 한글 입출력 설정
 def setup_encoding():
@@ -114,7 +115,12 @@ def main():
         searcher = RealTimeSearcher()
         history = ConversationHistory()
         gemini = GeminiClient()
-        gui = SimpleGUI(history)
+        
+        # ✅ GeminiGUI 실행 (스레드 사용)
+        import threading
+        gui = GeminiGUI(history)
+        gui_thread = threading.Thread(target=gui.run, daemon=True)
+        gui_thread.start()
         
         print(f"✅ 시스템 초기화 완료")
         print(f"📚 {len(history.conversations)}개의 이전 대화 기억 중")
