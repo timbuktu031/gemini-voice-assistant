@@ -3,14 +3,17 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import pytz
-from config import api_keys, app_config
+import os
 
 class RealTimeSearcher:
     """실시간 정보 검색 클래스"""
     
     def __init__(self):
-        self.api_keys = api_keys
-        self.timeout = app_config.request_timeout
+        # 환경변수에서 API 키 로드
+        self.naver_client_id = os.getenv("NAVER_CLIENT_ID")
+        self.naver_client_secret = os.getenv("NAVER_CLIENT_SECRET")
+        self.weather_api_key = os.getenv("WEATHER_API_KEY")
+        self.timeout = 10
 
     def search_news(self, query, language="ko"):
         """뉴스 검색"""
@@ -50,14 +53,14 @@ class RealTimeSearcher:
 
     def get_weather(self, city="Seoul"):
         """날씨 정보"""
-        if not self.api_keys.weather_api_key:
+        if not self.weather_api_key:
             return ["날씨 API 키가 설정되지 않았습니다."]
         
         try:
             url = "http://api.openweathermap.org/data/2.5/weather"
             params = {
                 'q': city,
-                'appid': self.api_keys.weather_api_key,
+                'appid': self.weather_api_key,
                 'units': 'metric',
                 'lang': 'kr'
             }
@@ -86,7 +89,7 @@ class RealTimeSearcher:
 
     def search_naver(self, query, search_type="news", display=3, sort="sim"):
         """네이버 검색 API 사용"""
-        if not (self.api_keys.naver_client_id and self.api_keys.naver_client_secret):
+        if not (self.naver_client_id and self.naver_client_secret):
             return None
 
         base_url = "https://openapi.naver.com/v1/search/"
@@ -94,8 +97,8 @@ class RealTimeSearcher:
         url = base_url + endpoint
 
         headers = {
-            "X-Naver-Client-Id": self.api_keys.naver_client_id,
-            "X-Naver-Client-Secret": self.api_keys.naver_client_secret
+            "X-Naver-Client-Id": self.naver_client_id,
+            "X-Naver-Client-Secret": self.naver_client_secret
         }
         params = {"query": query, "display": display, "sort": sort}
 
@@ -205,7 +208,7 @@ class RealTimeSearcher:
         print("🧪 API 연결 테스트 시작...")
         
         # 네이버 API 테스트
-        if self.api_keys.naver_client_id and self.api_keys.naver_client_secret:
+        if self.naver_client_id and self.naver_client_secret:
             test_result = self.search_naver("테스트", display=1)
             if test_result:
                 print("✅ 네이버 API 연결 성공")
@@ -215,7 +218,7 @@ class RealTimeSearcher:
             print("⚠️  네이버 API 키가 설정되지 않음")
         
         # 날씨 API 테스트
-        if self.api_keys.weather_api_key:
+        if self.weather_api_key:
             weather = self.get_weather("Seoul")
             if isinstance(weather, dict):
                 print("✅ 날씨 API 연결 성공")
