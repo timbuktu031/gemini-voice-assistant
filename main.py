@@ -1,304 +1,305 @@
-# main.py - 수정된 버전 (GUI 문제 해결)
-import threading
-import time
-import sys
-import io
-import locale
-import re
-import queue
+# modules/tts.py - 수정된 버전 (Import 문제 해결)
 import os
+import platform
+import time
+import re
 
-# GUI 통신용 전역 큐
-gui_queue = queue.Queue()
+# Google Cloud TTS 클라이언트 초기화
+try:
+    from google.cloud import texttospeech
+    tts_client = texttospeech.TextToSpeechClient()
+    print("✅ Google Cloud TTS 클라이언트 초기화 성공")
+except Exception as e:
+    print(f"❌ Google Cloud TTS 클라이언트 초기화 실패: {e}")
+    print("💡 해결방법: GOOGLE_APPLICATION_CREDENTIALS 환경변수를 설정하세요")
+    tts_client = None
 
-# 한글 입출력 설정
-def setup_encoding():
-    """한글 인코딩 설정"""
-    try:
-        locale.setlocale(locale.LC_ALL, 'ko_KR.UTF-8')
-    except:
-        try:
-            locale.setlocale(locale.LC_ALL, 'C.UTF-8')
-        except:
-            pass
-
-    if hasattr(sys.stdout, 'buffer'):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    if hasattr(sys.stdin, 'buffer'):
-        sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8', errors='replace')
-
-def safe_input(prompt):
-    """안전한 입력"""
-    try:
-        user_input = input(prompt)
-        if isinstance(user_input, bytes):
-            user_input = user_input.decode('utf-8', errors='replace')
-        
-        return user_input.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore').strip()
-    except Exception as e:
-        print(f"입력 오류: {e}")
+def clean_text(text):
+    """텍스트 정리 (TTS용)"""
+    if not text:
         return ""
-
-def detect_real_time_query(prompt):
-    """실시간 검색 필요 판단"""
-    keywords = ["최신", "지금", "현재", "오늘", "뉴스", "날씨", "시간", "요즘"]
-    return any(keyword in prompt.lower() for keyword in keywords)
-
-# 초기 설정
-setup_encoding()
-
-# 모듈 import
-from modules.searcher import RealTimeSearcher
-from modules.history import ConversationHistory
-from modules.gemini_client import GeminiClient
-from modules.tts import speak_korean, test_tts
-
-def send_to_gui(msg_type, content):
-    """GUI에 메시지 전송"""
+    
     try:
-        gui_queue.put((msg_type, content), block=False)
-        print(f"[GUI] {msg_type}: {content}")
+        if isinstance(text, bytes):
+            text = text.decode('utf-8', errors='replace')
+        
+        text = str(text).encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+        text = re.sub(r'<[^>]+>', '', text)
+        text = re.sub(r'[^\w\s가-힣.,?!~\-]', '', text)
+        text = re.sub(r'\s+', ' ', text)
+        
+        return text.strip()
+        
     except Exception as e:
-        print(f"GUI 전송 오류: {e}")
+        print(f"텍스트 정리 오류: {e}")
+        return str(text)[:100] if text else ""
 
-def check_display_available():
-    """디스플레이 환경 확인"""
-    try:
-        if os.name == 'posix':  # Linux/Unix 시스템
-            display = os.environ.get('DISPLAY')
-            if not display:
-                print("⚠️  DISPLAY 환경변수가 설정되지 않았습니다.")
+def get_audio_player_command(filename):
+    """운영체제별 오디오 재생 명령어 반환"""
+    system = platform.system().lower()
+    
+    if system == "linux":
+        players = [
+            f"aplay {filename}",
+            f"paplay {filename}",
+            f"mpv --no-video {filename}",
+            f"mpg123 {filename}"
+        ]
+        return players
+        
+    elif system == "darwin":
+        return [f"afplay {filename}"]
+        
+    elif system == "windows":
+        return [
+            f'powershell -c "(New-Object Media.SoundPlayer \\"{filename}\\").PlaySync()"',
+            f"start /wait wmplayer {filename}"
+        ]
+    else:
+        print(f"지원하지 않는 운영체제: {system}")
+        return []
+
+def play_audio(filename):
+    """운영체제별 오디오 재생"""
+    if not os.path.exists(filename):
+        print(f"❌ 오디오 파일을 찾을 수 없음: {filename}")
+        return False
+    
+    commands = get_audio_player_command(filename)
+    
+    for cmd in commands:
+        try:
+            print(f"🔊 오디오 재생 시도: {cmd.split()[0]}")
+            result = os.system(f"{cmd} 2>/dev/null")
+            
+            if result == 0:
+                print("✅ 오디오 재생 성공")
+                return True
+            else:
+                print(f"⚠️  명령어 실패 (code: {result})")
+                
+        except Exception as e:
+            print(f"❌ 재생 오류: {e}")
+            continue
+    
+    print("❌ 모든 오디오 플레이어 시도 실패")
+    return False
+
+def test_audio_system():
+    """오디오 시스템 테스트"""
+    system = platform.system().lower()
+    print(f"🔊 오디오 시스템 테스트 (OS: {system})")
+    
+    if system == "linux":
+        if os.system("which aplay >/dev/null 2>&1") != 0:
+            print("❌ aplay가 설치되지 않았습니다.")
+            print("💡 해결방법: sudo apt-get install alsa-utils")
+            
+            alternatives = ["paplay", "mpv", "mpg123"]
+            available = []
+            for player in alternatives:
+                if os.system(f"which {player} >/dev/null 2>&1") == 0:
+                    available.append(player)
+            
+            if available:
+                print(f"✅ 대체 플레이어 사용 가능: {', '.join(available)}")
+                return True
+            else:
+                print("❌ 사용 가능한 오디오 플레이어 없음")
                 return False
         
-        # tkinter 테스트
-        import tkinter as tk
-        test_root = tk.Tk()
-        test_root.withdraw()  # 창을 숨김
-        test_root.destroy()
-        return True
-    except Exception as e:
-        print(f"⚠️  GUI 환경 확인 실패: {e}")
+        if os.system("aplay -l >/dev/null 2>&1") != 0:
+            print("❌ 오디오 장치를 찾을 수 없습니다.")
+            print("💡 해결방법: sudo usermod -a -G audio $USER")
+            return False
+            
+    elif system == "darwin":
+        if os.system("which afplay >/dev/null 2>&1") != 0:
+            print("❌ afplay를 찾을 수 없습니다.")
+            return False
+            
+    elif system == "windows":
+        pass
+    
+    print("✅ 오디오 시스템 정상")
+    return True
+
+def speak_korean(text, test_mode=False):
+    """한국어 텍스트를 음성으로 변환 및 재생"""
+    
+    if not tts_client:
+        if not test_mode:
+            print("❌ Google Cloud TTS 클라이언트가 초기화되지 않았습니다.")
+            print("💡 GOOGLE_APPLICATION_CREDENTIALS 환경변수를 설정하세요.")
         return False
-
-def start_gui(history):
-    """GUI 시작 (별도 함수로 분리)"""
-    try:
-        from modules.gui import GeminiGUI
-        gui = GeminiGUI(history)
-        gui.run()
-    except Exception as e:
-        print(f"❌ GUI 시작 실패: {e}")
-        print("💡 터미널 모드로 계속 실행됩니다.")
-
-def get_real_time_info(searcher, prompt):
-    """실시간 정보 수집"""
-    results = []
     
-    if any(word in prompt.lower() for word in ["시간", "지금", "현재"]):
-        time_info = searcher.get_current_time_info()
-        results.append(f"현재 시간: {time_info['current_time']} ({time_info['weekday']})")
+    if not text or not text.strip():
+        print("❌ 변환할 텍스트가 없습니다.")
+        return False
     
-    if "날씨" in prompt.lower():
-        weather = searcher.get_weather()
-        if isinstance(weather, dict):
-            results.append(f"날씨: {weather['temperature']}°C, {weather['description']}, 체감온도 {weather['feels_like']}°C")
-        elif isinstance(weather, list):
-            results.extend(weather[:1])
+    cleaned_text = clean_text(text)
+    if not cleaned_text:
+        print("❌ 정리된 텍스트가 없습니다.")
+        return False
     
-    if "뉴스" in prompt.lower():
-        news = searcher.search_news("한국")
-        if news:
-            results.extend([f"뉴스: {item}" for item in news[:2]])
+    if len(cleaned_text) > 4900:
+        cleaned_text = cleaned_text[:4900] + "..."
+        if not test_mode:
+            print("⚠️  텍스트가 너무 길어서 일부만 재생됩니다.")
     
-    if not results or len(results) < 2:
-        web_results = searcher.search_web(prompt)
-        results.extend(web_results[:3-len(results)])
-    
-    return results
-
-def main():
-    """메인 함수"""
-    print("🤖 Gemini AI 음성 비서 시작")
-    print("=" * 50)
-    
-    # 객체 초기화
-    print("🔧 시스템 초기화 중...")
+    timestamp = int(time.time())
+    temp_filename = f"response_{timestamp}.wav"
     
     try:
-        searcher = RealTimeSearcher()
-        history = ConversationHistory()
-        gemini = GeminiClient()
+        synthesis_input = texttospeech.SynthesisInput(text=cleaned_text)
         
-        print(f"✅ 시스템 초기화 완료")
-        print(f"📚 {len(history.conversations)}개의 이전 대화 기억 중")
-        print("🔍 실시간 검색: 뉴스, 날씨, 시간 등")
+        voice = texttospeech.VoiceSelectionParams(
+            language_code="ko-KR",
+            name="ko-KR-Wavenet-A",
+            ssml_gender=texttospeech.SsmlVoiceGender.FEMALE
+        )
         
-        # GUI 시작 시도
-        gui_available = check_display_available()
-        gui_started = False
+        audio_config = texttospeech.AudioConfig(
+            audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+            speaking_rate=1.0,
+            pitch=0.0,
+            volume_gain_db=0.0
+        )
         
-        if gui_available:
-            try:
-                print("🖥️  GUI 환경 감지됨, GUI 창을 시작합니다...")
-                gui_thread = threading.Thread(target=start_gui, args=(history,), daemon=True)
-                gui_thread.start()
-                gui_started = True
-                time.sleep(2)  # GUI 시작 대기
-                print("✅ GUI 창이 시작되었습니다.")
-            except Exception as e:
-                print(f"⚠️  GUI 시작 실패: {e}")
-                print("💡 터미널 모드로 계속 실행됩니다.")
+        if not test_mode:
+            print("🔄 음성 합성 중...")
+        
+        response = tts_client.synthesize_speech(
+            input=synthesis_input,
+            voice=voice,
+            audio_config=audio_config
+        )
+        
+        with open(temp_filename, "wb") as audio_file:
+            audio_file.write(response.audio_content)
+        
+        if not test_mode:
+            print(f"💾 음성 파일 저장: {temp_filename}")
+        
+        play_success = play_audio(temp_filename)
+        
+        if play_success:
+            if not test_mode:
+                print("✅ 음성 재생 성공")
+            return True
         else:
-            print("💻 터미널 모드로 실행됩니다.")
-            print("💡 GUI를 사용하려면 다음을 확인하세요:")
-            print("   - X11 디스플레이 환경")
-            print("   - DISPLAY 환경변수")  
-            print("   - tkinter 패키지 설치")
-        
-        print("")
-        print("📝 명령어:")
-        print("  - 히스토리 또는 history: 대화 기록 보기")
-        print("  - 초기화 또는 clear: 히스토리 초기화") 
-        print("  - 검색테스트: 실시간 검색 테스트")
-        print("  - tts테스트: 음성 합성 테스트")
-        print("  - 종료 또는 exit: 프로그램 종료")
-        print("")
-        
-        # API 연결 테스트
-        print("🧪 API 연결 테스트...")
-        gemini.test_connection()
-        searcher.test_apis()
-        print("")
-        
+            if not test_mode:
+                print("❌ 음성 재생 실패")
+            return False
+            
     except Exception as e:
-        print(f"❌ 초기화 오류: {e}")
-        print("상세 오류:", str(e))
-        import traceback
-        traceback.print_exc()
+        error_msg = f"TTS 오류: {str(e)}"
+        print(f"❌ {error_msg}")
+        return False
+        
+    finally:
+        cleanup_temp_file(temp_filename)
+
+def cleanup_temp_file(filename, max_attempts=3):
+    """임시 파일 안전하게 삭제"""
+    if not os.path.exists(filename):
         return
     
-    # 메인 루프
-    while True:
+    for attempt in range(max_attempts):
         try:
-            user_input = safe_input("💬 질문: ")
-            
-            if not user_input:
-                continue
-            
-            # 종료 명령
-            if user_input.lower() in ["exit", "종료", "quit"]:
-                print("👋 프로그램을 종료합니다.")
-                break
-            
-            # 명령어 처리
-            if user_input.lower() in ["히스토리", "history"]:
-                print(f"\n=== 대화 히스토리 ({len(history.conversations)}개) ===")
-                if not history.conversations:
-                    print("저장된 대화가 없습니다.")
-                else:
-                    for i, conv in enumerate(history.conversations[-5:], 1):
-                        timestamp = conv['timestamp'][:19].replace('T', ' ')
-                        print(f"{i}. [{timestamp}] Q: {conv['question'][:50]}...")
-                        print(f"   A: {conv['answer'][:80]}...")
-                        print()
-                continue
-            
-            if user_input.lower() in ["초기화", "clear"]:
-                confirm = safe_input("정말로 히스토리를 삭제하시겠습니까? (y/N): ")
-                if confirm.lower() in ['y', 'yes']:
-                    history.clear_history()
-                    send_to_gui("history_update", "")
-                    print("✅ 히스토리 초기화 완료")
-                continue
-            
-            if user_input.lower() in ["검색테스트"]:
-                print("🔍 실시간 검색 테스트...")
-                time_info = searcher.get_current_time_info()
-                print(f"⏰ {time_info['current_time']} ({time_info['weekday']})")
-                
-                weather = searcher.get_weather()
-                if isinstance(weather, dict):
-                    print(f"🌤️ {weather['temperature']}°C, {weather['description']}")
-                
-                news = searcher.search_news("AI")
-                if news:
-                    print(f"📰 뉴스: {news[0]}")
-                continue
-            
-            if user_input.lower() in ["tts테스트"]:
-                print("🎤 TTS 테스트...")
-                test_result = test_tts()
-                if test_result:
-                    print("✅ TTS 테스트 성공")
-                else:
-                    print("❌ TTS 테스트 실패")
-                continue
-            
-            # 일반 질문 처리
-            print(f"\n❓ 질문: {user_input}")
-            send_to_gui("질문", user_input)
-            
-            # 컨텍스트 생성
-            context = history.get_context()
-            full_prompt = context
-            
-            # 실시간 정보 추가
-            if detect_real_time_query(user_input):
-                print("🔍 실시간 정보 검색 중...")
-                send_to_gui("status", "🔍 실시간 정보 검색 중...")
-                real_time_info = get_real_time_info(searcher, user_input)
-                
-                if real_time_info:
-                    full_prompt += "최신 정보:\n"
-                    for info in real_time_info:
-                        full_prompt += f"- {info}\n"
-                    full_prompt += "\n위 정보를 참고해서 답변해주세요.\n\n"
-                    print(f"✅ {len(real_time_info)}개의 실시간 정보 수집 완료")
-            
-            full_prompt += f"질문: {user_input}"
-            
-            # Gemini로 답변 생성
-            print("🤔 답변 생성 중...")
-            send_to_gui("status", "🤔 답변 생성 중...")
-            answer = gemini.generate_response(full_prompt)
-            
-            # 대화 저장
-            history.add_conversation(user_input, answer)
-            send_to_gui("답변", answer)
-            send_to_gui("history_update", "")
-            
-            print(f"\n🤖 답변: {answer}\n")
-            
-            # 음성 출력
-            max_length = 300
-            if len(answer) > max_length:
-                print("📄 답변이 길어서 요약 중...")
-                send_to_gui("status", "📄 요약 중...")
-                summary = gemini.summarize_text(answer)
-                print(f"📋 요약: {summary}")
-                send_to_gui("요약", summary)
-                
-                # 요약본 음성 출력
-                print("🔊 요약 음성 재생 중...")
-                send_to_gui("status", "🔊 음성 재생 중...")
-                speak_korean(summary)
-            else:
-                # 전체 답변 음성 출력
-                print("🔊 음성 재생 중...")
-                send_to_gui("status", "🔊 음성 재생 중...")
-                speak_korean(answer)
-            
-            send_to_gui("status", "✅ 준비 완료")
-            print("=" * 50)
-                
-        except KeyboardInterrupt:
-            print("\n👋 프로그램을 종료합니다.")
-            break
+            time.sleep(0.5)
+            os.remove(filename)
+            print(f"🗑️  임시 파일 삭제: {filename}")
+            return
         except Exception as e:
-            print(f"❌ 오류 발생: {e}")
-            import traceback
-            traceback.print_exc()
-            continue
+            if attempt < max_attempts - 1:
+                print(f"⚠️  파일 삭제 재시도... ({attempt + 1}/{max_attempts})")
+                time.sleep(1)
+            else:
+                print(f"❌ 임시 파일 삭제 실패: {e}")
 
+def get_available_voices():
+    """사용 가능한 한국어 음성 목록 조회"""
+    if not tts_client:
+        print("❌ TTS 클라이언트가 초기화되지 않음")
+        return []
+        
+    try:
+        print("🔍 사용 가능한 음성 목록 조회 중...")
+        voices = tts_client.list_voices()
+        korean_voices = []
+        
+        for voice in voices.voices:
+            for lang_code in voice.language_codes:
+                if lang_code.startswith('ko'):
+                    korean_voices.append({
+                        'name': voice.name,
+                        'gender': voice.ssml_gender.name,
+                        'language': lang_code
+                    })
+                    break
+        
+        return korean_voices
+        
+    except Exception as e:
+        print(f"❌ 음성 목록 조회 오류: {e}")
+        return []
+
+def test_tts(test_text="안녕하세요. 음성 합성 테스트입니다."):
+    """TTS 시스템 전체 테스트"""
+    print("🧪 TTS 시스템 테스트 시작...")
+    print("=" * 40)
+    
+    print("1️⃣ 오디오 시스템 테스트")
+    if not test_audio_system():
+        print("❌ 오디오 시스템 테스트 실패")
+        return False
+    
+    print("\n2️⃣ Google Cloud TTS 인증 테스트")
+    if not tts_client:
+        print("❌ Google Cloud TTS 클라이언트 없음")
+        return False
+    
+    print("\n3️⃣ 사용 가능한 음성 조회")
+    voices = get_available_voices()
+    if voices:
+        print(f"✅ {len(voices)}개의 한국어 음성 발견:")
+        for voice in voices[:3]:
+            print(f"   - {voice['name']} ({voice['gender']})")
+    else:
+        print("⚠️  한국어 음성을 찾을 수 없음")
+    
+    print(f"\n4️⃣ 음성 합성 및 재생 테스트")
+    print(f"📝 테스트 텍스트: '{test_text}'")
+    
+    success = speak_korean(test_text, test_mode=True)
+    
+    print("=" * 40)
+    if success:
+        print("🎉 TTS 시스템 테스트 성공!")
+        return True
+    else:
+        print("❌ TTS 시스템 테스트 실패")
+        return False
+
+# 모듈 테스트용 메인 함수
 if __name__ == "__main__":
-    main()
+    print("🎤 TTS 모듈 단독 테스트")
+    print("=" * 50)
+    
+    print("🔧 환경 확인:")
+    print(f"   - Google Cloud 인증: {'✅' if tts_client else '❌'}")
+    print(f"   - 운영체제: {platform.system()}")
+    
+    test_result = test_tts()
+    
+    if test_result:
+        print("\n🎯 추가 테스트를 원하면 다른 텍스트를 입력하세요:")
+        while True:
+            user_text = input("텍스트 입력 (종료: 'quit'): ").strip()
+            if user_text.lower() in ['quit', '종료', 'exit']:
+                break
+            if user_text:
+                speak_korean(user_text)
+    
+    print("👋 테스트 완료")
