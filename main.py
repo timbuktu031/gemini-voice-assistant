@@ -1,11 +1,15 @@
-# main.py
+# main.py - 수정된 버전 (GUI 문제 해결)
 import threading
 import time
 import sys
 import io
 import locale
 import re
-from modules.gui import GeminiGUI, send_to_gui, gui_queue
+import queue
+import os
+
+# GUI 통신용 전역 큐
+gui_queue = queue.Queue()
 
 # 한글 입출력 설정
 def setup_encoding():
@@ -18,7 +22,6 @@ def setup_encoding():
         except:
             pass
 
-    # 표준 입출력 UTF-8 설정
     if hasattr(sys.stdout, 'buffer'):
         sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     if hasattr(sys.stdin, 'buffer'):
@@ -48,41 +51,53 @@ setup_encoding()
 from modules.searcher import RealTimeSearcher
 from modules.history import ConversationHistory
 from modules.gemini_client import GeminiClient
-from modules.tts import speak_korean, test_tts, gui_queue
-
-class SimpleGUI:
-    """간단한 GUI (복잡한 GUI 문제 해결용)"""
-    def __init__(self, history):
-        self.history = history
-        self.messages = []
-    
-    def add_message(self, msg_type, content):
-        timestamp = time.strftime("%H:%M:%S")
-        message = f"[{timestamp}] {msg_type}: {content}"
-        self.messages.append(message)
-        print(f"GUI: {message}")
-    
-    def update_status(self, status):
-        print(f"상태: {status}")
+from modules.tts import speak_korean, test_tts
 
 def send_to_gui(msg_type, content):
-    """GUI에 메시지 전송 (단순화)"""
+    """GUI에 메시지 전송"""
     try:
-        gui_queue.put((msg_type, content))
+        gui_queue.put((msg_type, content), block=False)
         print(f"[GUI] {msg_type}: {content}")
     except Exception as e:
         print(f"GUI 전송 오류: {e}")
+
+def check_display_available():
+    """디스플레이 환경 확인"""
+    try:
+        if os.name == 'posix':  # Linux/Unix 시스템
+            display = os.environ.get('DISPLAY')
+            if not display:
+                print("⚠️  DISPLAY 환경변수가 설정되지 않았습니다.")
+                return False
+        
+        # tkinter 테스트
+        import tkinter as tk
+        test_root = tk.Tk()
+        test_root.withdraw()  # 창을 숨김
+        test_root.destroy()
+        return True
+    except Exception as e:
+        print(f"⚠️  GUI 환경 확인 실패: {e}")
+        return False
+
+def start_gui(history):
+    """GUI 시작 (별도 함수로 분리)"""
+    try:
+        from modules.gui import GeminiGUI
+        gui = GeminiGUI(history)
+        gui.run()
+    except Exception as e:
+        print(f"❌ GUI 시작 실패: {e}")
+        print("💡 터미널 모드로 계속 실행됩니다.")
 
 def get_real_time_info(searcher, prompt):
     """실시간 정보 수집"""
     results = []
     
-    # 시간 관련 키워드
     if any(word in prompt.lower() for word in ["시간", "지금", "현재"]):
         time_info = searcher.get_current_time_info()
         results.append(f"현재 시간: {time_info['current_time']} ({time_info['weekday']})")
     
-    # 날씨 관련 키워드
     if "날씨" in prompt.lower():
         weather = searcher.get_weather()
         if isinstance(weather, dict):
@@ -90,13 +105,11 @@ def get_real_time_info(searcher, prompt):
         elif isinstance(weather, list):
             results.extend(weather[:1])
     
-    # 뉴스 관련 키워드
     if "뉴스" in prompt.lower():
         news = searcher.search_news("한국")
         if news:
             results.extend([f"뉴스: {item}" for item in news[:2]])
     
-    # 일반 검색
     if not results or len(results) < 2:
         web_results = searcher.search_web(prompt)
         results.extend(web_results[:3-len(results)])
@@ -116,15 +129,32 @@ def main():
         history = ConversationHistory()
         gemini = GeminiClient()
         
-        # ✅ GeminiGUI 실행 (스레드 사용)
-        import threading
-        gui = GeminiGUI(history)
-        gui_thread = threading.Thread(target=gui.run, daemon=True)
-        gui_thread.start()
-        
         print(f"✅ 시스템 초기화 완료")
         print(f"📚 {len(history.conversations)}개의 이전 대화 기억 중")
         print("🔍 실시간 검색: 뉴스, 날씨, 시간 등")
+        
+        # GUI 시작 시도
+        gui_available = check_display_available()
+        gui_started = False
+        
+        if gui_available:
+            try:
+                print("🖥️  GUI 환경 감지됨, GUI 창을 시작합니다...")
+                gui_thread = threading.Thread(target=start_gui, args=(history,), daemon=True)
+                gui_thread.start()
+                gui_started = True
+                time.sleep(2)  # GUI 시작 대기
+                print("✅ GUI 창이 시작되었습니다.")
+            except Exception as e:
+                print(f"⚠️  GUI 시작 실패: {e}")
+                print("💡 터미널 모드로 계속 실행됩니다.")
+        else:
+            print("💻 터미널 모드로 실행됩니다.")
+            print("💡 GUI를 사용하려면 다음을 확인하세요:")
+            print("   - X11 디스플레이 환경")
+            print("   - DISPLAY 환경변수")  
+            print("   - tkinter 패키지 설치")
+        
         print("")
         print("📝 명령어:")
         print("  - 히스토리 또는 history: 대화 기록 보기")
@@ -142,6 +172,9 @@ def main():
         
     except Exception as e:
         print(f"❌ 초기화 오류: {e}")
+        print("상세 오류:", str(e))
+        import traceback
+        traceback.print_exc()
         return
     
     # 메인 루프
@@ -174,6 +207,7 @@ def main():
                 confirm = safe_input("정말로 히스토리를 삭제하시겠습니까? (y/N): ")
                 if confirm.lower() in ['y', 'yes']:
                     history.clear_history()
+                    send_to_gui("history_update", "")
                     print("✅ 히스토리 초기화 완료")
                 continue
             
@@ -211,6 +245,7 @@ def main():
             # 실시간 정보 추가
             if detect_real_time_query(user_input):
                 print("🔍 실시간 정보 검색 중...")
+                send_to_gui("status", "🔍 실시간 정보 검색 중...")
                 real_time_info = get_real_time_info(searcher, user_input)
                 
                 if real_time_info:
@@ -224,11 +259,13 @@ def main():
             
             # Gemini로 답변 생성
             print("🤔 답변 생성 중...")
+            send_to_gui("status", "🤔 답변 생성 중...")
             answer = gemini.generate_response(full_prompt)
             
             # 대화 저장
             history.add_conversation(user_input, answer)
             send_to_gui("답변", answer)
+            send_to_gui("history_update", "")
             
             print(f"\n🤖 답변: {answer}\n")
             
@@ -236,17 +273,22 @@ def main():
             max_length = 300
             if len(answer) > max_length:
                 print("📄 답변이 길어서 요약 중...")
+                send_to_gui("status", "📄 요약 중...")
                 summary = gemini.summarize_text(answer)
                 print(f"📋 요약: {summary}")
+                send_to_gui("요약", summary)
                 
                 # 요약본 음성 출력
                 print("🔊 요약 음성 재생 중...")
+                send_to_gui("status", "🔊 음성 재생 중...")
                 speak_korean(summary)
             else:
                 # 전체 답변 음성 출력
                 print("🔊 음성 재생 중...")
+                send_to_gui("status", "🔊 음성 재생 중...")
                 speak_korean(answer)
             
+            send_to_gui("status", "✅ 준비 완료")
             print("=" * 50)
                 
         except KeyboardInterrupt:
@@ -254,6 +296,8 @@ def main():
             break
         except Exception as e:
             print(f"❌ 오류 발생: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
 if __name__ == "__main__":
