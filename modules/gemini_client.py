@@ -1,6 +1,6 @@
 # modules/gemini_client.py
 import google.generativeai as genai
-from config import api_keys, app_config
+import os
 import time
 import re
 
@@ -8,7 +8,16 @@ class GeminiClient:
     """Gemini API 클라이언트"""
     
     def __init__(self):
-        # API 키 설정 (config.py에서 이미 설정됨)
+        # 환경변수에서 API 키 로드
+        self.gemini_api_key = os.getenv("GEMINI_API_KEY")
+        
+        if not self.gemini_api_key:
+            print("❌ GEMINI_API_KEY 환경변수가 설정되지 않았습니다.")
+            self.model = None
+            return
+        
+        # API 키 설정
+        genai.configure(api_key=self.gemini_api_key)
         self.model_name = "gemini-2.0-flash-exp"
         
         # 모델 초기화
@@ -113,9 +122,9 @@ class GeminiClient:
         
         return cleaned
     
-    def summarize_text(self, text, target_sentences=2):
+    def summarize_text(self, text, target_sentences=2, max_summary_length=300):
         """텍스트 요약"""
-        if len(text) <= app_config.max_summary_length:
+        if len(text) <= max_summary_length:
             return text
         
         summary_prompt = f"""다음 텍스트를 {target_sentences}문장으로 요약해주세요. 
@@ -144,66 +153,11 @@ class GeminiClient:
             print(f"요약 오류: {e}")
             return text[:200] + "..." if len(text) > 200 else text
     
-    def analyze_sentiment(self, text):
-        """감정 분석"""
-        sentiment_prompt = f"""다음 텍스트의 감정을 분석하고 간단히 답해주세요:
-
-{text}
-
-감정 분석 결과 (긍정/부정/중립 중 하나와 간단한 이유):"""
-        
-        try:
-            response = self.model.generate_content(
-                sentiment_prompt,
-                generation_config={
-                    "temperature": 0.2,
-                    "max_output_tokens": 100
-                }
-            )
-            
-            if response and response.text:
-                return self._post_process_response(response.text)
-            else:
-                return "감정 분석을 할 수 없습니다."
-                
-        except Exception as e:
-            print(f"감정 분석 오류: {e}")
-            return "감정 분석 중 오류가 발생했습니다."
-    
-    def generate_follow_up_questions(self, conversation_text, num_questions=3):
-        """후속 질문 생성"""
-        followup_prompt = f"""다음 대화를 바탕으로 자연스러운 후속 질문 {num_questions}개를 생성해주세요:
-
-{conversation_text}
-
-후속 질문들:"""
-        
-        try:
-            response = self.model.generate_content(
-                followup_prompt,
-                generation_config={
-                    "temperature": 0.8,
-                    "max_output_tokens": 300
-                }
-            )
-            
-            if response and response.text:
-                questions = self._post_process_response(response.text)
-                # 질문들을 리스트로 분리
-                question_list = [q.strip() for q in questions.split('\n') if q.strip()]
-                return question_list[:num_questions]
-            else:
-                return []
-                
-        except Exception as e:
-            print(f"후속 질문 생성 오류: {e}")
-            return []
-    
     def test_connection(self):
         """연결 테스트"""
         print("🧪 Gemini API 연결 테스트...")
         
-        if not api_keys.gemini_api_key:
+        if not self.gemini_api_key:
             print("❌ Gemini API 키가 설정되지 않음")
             return False
         
@@ -220,36 +174,4 @@ class GeminiClient:
                 
         except Exception as e:
             print(f"❌ Gemini API 테스트 오류: {e}")
-            return False
-    
-    def get_model_info(self):
-        """모델 정보 조회"""
-        try:
-            # 사용 가능한 모델 목록 조회
-            models = genai.list_models()
-            available_models = []
-            
-            for model in models:
-                if 'generateContent' in model.supported_generation_methods:
-                    available_models.append(model.name)
-            
-            return {
-                'current_model': self.model_name,
-                'available_models': available_models,
-                'generation_config': self.generation_config
-            }
-            
-        except Exception as e:
-            print(f"모델 정보 조회 오류: {e}")
-            return None
-    
-    def change_model(self, model_name):
-        """모델 변경"""
-        try:
-            self.model = genai.GenerativeModel(model_name)
-            self.model_name = model_name
-            print(f"✅ 모델이 {model_name}로 변경되었습니다.")
-            return True
-        except Exception as e:
-            print(f"❌ 모델 변경 오류: {e}")
             return False
