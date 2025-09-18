@@ -3,7 +3,7 @@ from google.cloud import texttospeech
 import os
 import platform
 import time
-from modules.utils.text_utils import clean_text
+from .utils.text_utils import clean_text
 from .gui import send_to_gui
 from modules.config import app_config
 
