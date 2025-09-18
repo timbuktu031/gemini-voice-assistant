@@ -5,7 +5,7 @@ import sys
 import io
 import locale
 import re
-from modules.gui import GeminiGUI
+from modules.gui import GeminiGUI, send_to_gui, gui_queue
 
 # 한글 입출력 설정
 def setup_encoding():
