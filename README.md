@@ -18,10 +18,12 @@ Google STT + Gemini + GTTS 기반의 자연스러운 한국어 음성 비서입�
 ## 📦 설치 방법
 
 먼저 가상환경을 만들어야 합니다.  
+```bash
 sudo apt update  
 sudo apt install python3-full  
 python3 -m venv venv  
 source venv/bin/activate  
+```
 
 ```bash
 git clone https://github.com/timbuktu031/gemini-voice-assistant.git
