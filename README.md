@@ -18,12 +18,9 @@ Google STT + Gemini + GTTS 기반의 자연스러운 한국어 음성 비서입�
 ## 📦 설치 방법
 
 먼저 가상환경을 만들어야 합니다.
-# 1. python3-full이 설치되어 있는지 확인
 sudo apt update
 sudo apt install python3-full
-# 2. 프로젝트 폴더 안에 가상 환경 생성
 python3 -m venv venv
-# 3. 가상 환경 활성화
 source venv/bin/activate
 
 ```bash
